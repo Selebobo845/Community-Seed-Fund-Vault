@@ -16,6 +16,7 @@
 (define-constant ERR_ALERT_NOT_FOUND (err u114))
 (define-constant ERR_INVALID_ALERT_THRESHOLD (err u115))
 (define-constant ERR_FUND_BALANCE_TOO_LOW (err u116))
+(define-constant ERR_CONTRACT_PAUSED (err u117))
 
 (define-data-var total-fund-balance uint u0)
 (define-data-var next-loan-id uint u1)
@@ -24,44 +25,47 @@
 (define-data-var collateral-ratio uint u150)
 (define-data-var base-interest-rate uint u15)
 (define-data-var reputation-discount-rate uint u5)
+(define-data-var contract-pause-state {
+    paused: bool,
+    reason: (string-ascii 100),
+    since-block: uint,
+} {
+    paused: false,
+    reason: "",
+    since-block: u0,
+})
 
 ;; === LOAN ALERT SYSTEM DATA STRUCTURES ===
 
 ;; Alert settings with configurable thresholds
-(define-data-var alert-settings
-  {
+(define-data-var alert-settings {
     seven-day-threshold: uint,
     three-day-threshold: uint,
     one-day-threshold: uint,
     fund-low-balance-threshold: uint,
-    enabled: bool
-  }
-  {
-    seven-day-threshold: u1008,    ;; 7 days in blocks (~144 blocks/day)
-    three-day-threshold: u432,     ;; 3 days in blocks
-    one-day-threshold: u144,       ;; 1 day in blocks
-    fund-low-balance-threshold: u100000000,  ;; 1000 STX minimum
-    enabled: true
-  }
-)
+    enabled: bool,
+} {
+    seven-day-threshold: u1008, ;; 7 days in blocks (~144 blocks/day)
+    three-day-threshold: u432, ;; 3 days in blocks
+    one-day-threshold: u144, ;; 1 day in blocks
+    fund-low-balance-threshold: u100000000, ;; 1000 STX minimum
+    enabled: true,
+})
 
 ;; Fund health metrics for performance monitoring
-(define-data-var fund-health-metrics
-  {
+(define-data-var fund-health-metrics {
     total-active-loans: uint,
     total-overdue-loans: uint,
     utilization-rate: uint,
     default-rate: uint,
-    last-updated: uint
-  }
-  {
+    last-updated: uint,
+} {
     total-active-loans: u0,
     total-overdue-loans: u0,
     utilization-rate: u0,
     default-rate: u0,
-    last-updated: u0
-  }
-)
+    last-updated: u0,
+})
 
 (define-map farmers
     principal
@@ -119,7 +123,7 @@
         three-day-alert: bool,
         one-day-alert: bool,
         overdue-alert: bool,
-        last-check: uint
+        last-check: uint,
     }
 )
 
@@ -128,6 +132,9 @@
         (location (string-ascii 100))
     )
     (let ((farmer tx-sender))
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-none (map-get? farmers farmer))
             ERR_FARMER_ALREADY_REGISTERED
         )
@@ -148,6 +155,9 @@
 
 (define-public (contribute-to-fund (amount uint))
     (let ((contributor tx-sender))
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (> amount u0) ERR_INVALID_AMOUNT)
         (try! (stx-transfer? amount contributor (as-contract tx-sender)))
         (var-set total-fund-balance (+ (var-get total-fund-balance) amount))
@@ -172,6 +182,9 @@
             (dynamic-rate (calculate-dynamic-interest-rate farmer))
             (interest-amount (/ (* amount dynamic-rate) u100))
         )
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-some (map-get? farmers farmer)) ERR_FARMER_NOT_REGISTERED)
         (asserts! (> amount u0) ERR_INVALID_AMOUNT)
         (asserts! (<= amount (var-get total-fund-balance)) ERR_INSUFFICIENT_FUNDS)
@@ -194,6 +207,9 @@
 
 (define-public (approve-loan (loan-id uint))
     (let ((loan (unwrap! (map-get? loans loan-id) ERR_LOAN_NOT_FOUND)))
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
         (asserts! (not (get approved loan)) ERR_LOAN_ALREADY_APPROVED)
         (let (
@@ -230,6 +246,9 @@
 
 (define-public (repay-loan (loan-id uint))
     (let ((loan (unwrap! (map-get? loans loan-id) ERR_LOAN_NOT_FOUND)))
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-eq tx-sender (get farmer loan)) ERR_UNAUTHORIZED)
         (asserts! (get approved loan) ERR_LOAN_NOT_APPROVED)
         (asserts! (not (get repaid loan)) ERR_LOAN_ALREADY_REPAID)
@@ -279,6 +298,9 @@
 
 (define-public (emergency-withdraw (amount uint))
     (begin
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
         (asserts! (<= amount (var-get total-fund-balance)) ERR_INSUFFICIENT_FUNDS)
         (try! (as-contract (stx-transfer? amount tx-sender CONTRACT_OWNER)))
@@ -289,6 +311,9 @@
 
 (define-public (update-interest-rate (new-rate uint))
     (begin
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
         (var-set interest-rate new-rate)
         (ok true)
@@ -297,6 +322,9 @@
 
 (define-public (update-base-interest-rate (new-rate uint))
     (begin
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
         (var-set base-interest-rate new-rate)
         (ok true)
@@ -305,6 +333,9 @@
 
 (define-public (update-reputation-discount-rate (new-rate uint))
     (begin
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
         (var-set reputation-discount-rate new-rate)
         (ok true)
@@ -313,6 +344,9 @@
 
 (define-public (update-loan-duration (new-duration uint))
     (begin
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
         (var-set loan-duration-blocks new-duration)
         (ok true)
@@ -321,6 +355,9 @@
 
 (define-public (deposit-collateral (amount uint))
     (let ((depositor tx-sender))
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (> amount u0) ERR_INVALID_AMOUNT)
         (asserts! (is-none (map-get? collateral-deposits depositor))
             ERR_COLLATERAL_ALREADY_DEPOSITED
@@ -343,6 +380,9 @@
                 ERR_COLLATERAL_NOT_FOUND
             ))
         )
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (not (get locked collateral)) ERR_UNAUTHORIZED)
         (let ((amount (get amount collateral)))
             (try! (as-contract (stx-transfer? amount tx-sender depositor)))
@@ -362,6 +402,9 @@
                 ERR_COLLATERAL_NOT_FOUND
             ))
             (required-collateral (/ (* amount (var-get collateral-ratio)) u100))
+        )
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
         )
         (asserts! (is-some (map-get? farmers farmer)) ERR_FARMER_NOT_REGISTERED)
         (asserts! (> amount u0) ERR_INVALID_AMOUNT)
@@ -400,6 +443,9 @@
             (collateral (unwrap! (map-get? collateral-deposits farmer)
                 ERR_COLLATERAL_NOT_FOUND
             ))
+        )
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
         )
         (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
         (asserts! (get approved loan) ERR_LOAN_NOT_APPROVED)
@@ -447,6 +493,9 @@
 
 (define-public (update-collateral-ratio (new-ratio uint))
     (begin
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
         (var-set collateral-ratio new-ratio)
         (ok true)
@@ -456,13 +505,16 @@
 ;; === LOAN ALERT SYSTEM FUNCTIONS ===
 
 ;; Update alert threshold settings (owner only)
-(define-public (update-alert-thresholds 
-        (seven-day uint) 
-        (three-day uint) 
-        (one-day uint) 
+(define-public (update-alert-thresholds
+        (seven-day uint)
+        (three-day uint)
+        (one-day uint)
         (fund-threshold uint)
     )
     (begin
+        (asserts! (not (get paused (var-get contract-pause-state)))
+            ERR_CONTRACT_PAUSED
+        )
         (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
         (asserts! (> seven-day three-day) ERR_INVALID_ALERT_THRESHOLD)
         (asserts! (> three-day one-day) ERR_INVALID_ALERT_THRESHOLD)
@@ -473,7 +525,7 @@
             three-day-threshold: three-day,
             one-day-threshold: one-day,
             fund-low-balance-threshold: fund-threshold,
-            enabled: true
+            enabled: true,
         })
         (ok true)
     )
@@ -481,16 +533,13 @@
 
 ;; Initialize loan alerts for a new loan
 (define-private (initialize-loan-alerts (loan-id uint))
-    (map-set loan-alerts 
-        { loan-id: loan-id }
-        {
-            seven-day-alert: false,
-            three-day-alert: false,
-            one-day-alert: false,
-            overdue-alert: false,
-            last-check: stacks-block-height
-        }
-    )
+    (map-set loan-alerts { loan-id: loan-id } {
+        seven-day-alert: false,
+        three-day-alert: false,
+        one-day-alert: false,
+        overdue-alert: false,
+        last-check: stacks-block-height,
+    })
 )
 
 ;; Check loan due dates and identify those approaching deadlines
@@ -499,13 +548,13 @@
         loan (match (get due-at loan)
             due-block (if (and (get approved loan) (not (get repaid loan)))
                 (let (
-                    (current-block stacks-block-height)
-                    (blocks-remaining (if (> due-block current-block) 
-                        (- due-block current-block) 
-                        u0
-                    ))
-                    (settings (var-get alert-settings))
-                )
+                        (current-block stacks-block-height)
+                        (blocks-remaining (if (> due-block current-block)
+                            (- due-block current-block)
+                            u0
+                        ))
+                        (settings (var-get alert-settings))
+                    )
                     (some {
                         loan-id: loan-id,
                         due-block: due-block,
@@ -513,7 +562,7 @@
                         seven-day-warning: (and (> blocks-remaining u0) (<= blocks-remaining (get seven-day-threshold settings))),
                         three-day-warning: (and (> blocks-remaining u0) (<= blocks-remaining (get three-day-threshold settings))),
                         one-day-warning: (and (> blocks-remaining u0) (<= blocks-remaining (get one-day-threshold settings))),
-                        overdue: (is-eq blocks-remaining u0)
+                        overdue: (is-eq blocks-remaining u0),
                     })
                 )
                 none
@@ -546,7 +595,7 @@
                 repaid-at: (get repaid-at loan),
                 due-date-info: due-dates,
                 risk-level: risk-assessment,
-                total-repayment: repayment-amount
+                total-repayment: repayment-amount,
             })
         )
         none
@@ -556,17 +605,17 @@
 ;; Get overdue loan summary with statistics
 (define-read-only (get-overdue-loan-summary)
     (let (
-        (current-block stacks-block-height)
-        (total-loans (- (var-get next-loan-id) u1))
-    )
+            (current-block stacks-block-height)
+            (total-loans (- (var-get next-loan-id) u1))
+        )
         ;; Note: In a real implementation, we would iterate through all loans
         ;; For this demo, we provide the structure for overdue loan tracking
         {
             total-loans: total-loans,
-            overdue-count: u0,  ;; Would be calculated by iterating through all active loans
-            total-overdue-amount: u0,  ;; Sum of all overdue loan amounts
-            average-days-overdue: u0,  ;; Average overdue period
-            last-updated: current-block
+            overdue-count: u0, ;; Would be calculated by iterating through all active loans
+            total-overdue-amount: u0, ;; Sum of all overdue loan amounts
+            average-days-overdue: u0, ;; Average overdue period
+            last-updated: current-block,
         }
     )
 )
@@ -574,20 +623,23 @@
 ;; Calculate comprehensive fund health score (0-100)
 (define-read-only (calculate-fund-health-score)
     (let (
-        (fund-balance (var-get total-fund-balance))
-        (settings (var-get alert-settings))
-        (fund-threshold (get fund-low-balance-threshold settings))
-        (total-loans (- (var-get next-loan-id) u1))
-        ;; Balance score (40% weight): Higher balance = better score
-        (balance-score (if (>= fund-balance fund-threshold)
-            u40
-            (/ (* fund-balance u40) fund-threshold)
-        ))
-        ;; Activity score (30% weight): Having loans shows activity
-        (activity-score (if (> total-loans u0) u30 u0))
-        ;; Stability score (30% weight): Lower overdue rate = higher score
-        (stability-score u30)  ;; Simplified - would calculate based on overdue rates
-    )
+            (fund-balance (var-get total-fund-balance))
+            (settings (var-get alert-settings))
+            (fund-threshold (get fund-low-balance-threshold settings))
+            (total-loans (- (var-get next-loan-id) u1))
+            ;; Balance score (40% weight): Higher balance = better score
+            (balance-score (if (>= fund-balance fund-threshold)
+                u40
+                (/ (* fund-balance u40) fund-threshold)
+            ))
+            ;; Activity score (30% weight): Having loans shows activity
+            (activity-score (if (> total-loans u0)
+                u30
+                u0
+            ))
+            ;; Stability score (30% weight): Lower overdue rate = higher score
+            (stability-score u30) ;; Simplified - would calculate based on overdue rates
+        )
         {
             overall-score: (+ (+ balance-score activity-score) stability-score),
             balance-score: balance-score,
@@ -595,7 +647,7 @@
             stability-score: stability-score,
             fund-balance: fund-balance,
             total-loans: total-loans,
-            last-calculated: stacks-block-height
+            last-calculated: stacks-block-height,
         }
     )
 )
@@ -615,13 +667,28 @@
                         (successful-loans (get successful-loans farmer-data))
                         (total-farmer-loans (get total-loans farmer-data))
                         ;; Risk factors calculation
-                        (reputation-risk (if (>= reputation u75) u10 
-                            (if (>= reputation u50) u25 u40)
+                        (reputation-risk (if (>= reputation u75)
+                            u10
+                            (if (>= reputation u50)
+                                u25
+                                u40
+                            )
                         ))
-                        (amount-risk (if (> (* loan-amount u10) fund-balance) u30 u10))
-                        (history-risk (if (and (> total-farmer-loans u0) 
-                            (>= (/ (* successful-loans u100) total-farmer-loans) u80))
-                            u5 u20
+                        (amount-risk (if (> (* loan-amount u10) fund-balance)
+                            u30
+                            u10
+                        ))
+                        (history-risk (if (and
+                                (> total-farmer-loans u0)
+                                (>=
+                                    (/ (* successful-loans u100)
+                                        total-farmer-loans
+                                    )
+                                    u80
+                                )
+                            )
+                            u5
+                            u20
                         ))
                         (total-risk (+ (+ reputation-risk amount-risk) history-risk))
                     )
@@ -633,9 +700,13 @@
                         amount-risk: amount-risk,
                         history-risk: history-risk,
                         total-risk-score: total-risk,
-                        risk-level: (if (<= total-risk u20) "LOW"
-                            (if (<= total-risk u50) "MEDIUM" "HIGH")
-                        )
+                        risk-level: (if (<= total-risk u20)
+                            "LOW"
+                            (if (<= total-risk u50)
+                                "MEDIUM"
+                                "HIGH"
+                            )
+                        ),
                     })
                 )
                 none
@@ -648,22 +719,22 @@
 ;; Check if fund balance is critically low
 (define-read-only (trigger-fund-low-balance-alert)
     (let (
-        (current-balance (var-get total-fund-balance))
-        (settings (var-get alert-settings))
-        (threshold (get fund-low-balance-threshold settings))
-    )
+            (current-balance (var-get total-fund-balance))
+            (settings (var-get alert-settings))
+            (threshold (get fund-low-balance-threshold settings))
+        )
         {
             alert-triggered: (< current-balance threshold),
             current-balance: current-balance,
             threshold: threshold,
-            deficit: (if (< current-balance threshold) 
-                (- threshold current-balance) 
+            deficit: (if (< current-balance threshold)
+                (- threshold current-balance)
                 u0
             ),
             percentage-of-threshold: (if (> threshold u0)
                 (/ (* current-balance u100) threshold)
                 u0
-            )
+            ),
         }
     )
 )
@@ -808,4 +879,23 @@
 
 (define-read-only (get-reputation-discount-rate)
     (var-get reputation-discount-rate)
+)
+
+(define-public (set-contract-pause-state
+        (paused bool)
+        (reason (string-ascii 100))
+    )
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
+        (var-set contract-pause-state {
+            paused: paused,
+            reason: reason,
+            since-block: stacks-block-height,
+        })
+        (ok true)
+    )
+)
+
+(define-read-only (get-contract-pause-state)
+    (var-get contract-pause-state)
 )
