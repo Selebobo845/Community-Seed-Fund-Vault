@@ -821,6 +821,51 @@
     (/ (* loan-amount (var-get collateral-ratio)) u100)
 )
 
+(define-read-only (preview-loan-offer (farmer principal) (amount uint))
+    (let (
+            (fund-balance (var-get total-fund-balance))
+            (is-paused (get paused (var-get contract-pause-state)))
+            (farmer-opt (map-get? farmers farmer))
+            (collateral-opt (map-get? collateral-deposits farmer))
+            (dynamic-rate (calculate-dynamic-interest-rate farmer))
+            (interest-amount (if (> amount u0)
+                (/ (* amount dynamic-rate) u100)
+                u0
+            ))
+            (required-collateral (/ (* amount (var-get collateral-ratio)) u100))
+        )
+        (let (
+                (has-farmer (is-some farmer-opt))
+                (has-collateral (is-some collateral-opt))
+                (collateral-amount (match collateral-opt
+                    collateral-data (get amount collateral-data)
+                    u0
+                ))
+                (has-funds (<= amount fund-balance))
+                (valid-amount (> amount u0))
+                (base-eligible (and (and (and (not is-paused) has-farmer) valid-amount) has-funds))
+                (collateral-sufficient (>= collateral-amount required-collateral))
+            )
+            {
+                farmer: farmer,
+                amount: amount,
+                interest-rate: dynamic-rate,
+                interest-amount: interest-amount,
+                total-repayment: (+ amount interest-amount),
+                required-collateral: required-collateral,
+                available-collateral: collateral-amount,
+                has-collateral: has-collateral,
+                collateral-sufficient: collateral-sufficient,
+                contract-paused: is-paused,
+                farmer-registered: has-farmer,
+                sufficient-funds: has-funds,
+                valid-amount: valid-amount,
+                eligible: (and base-eligible (or (not has-collateral) collateral-sufficient)),
+            }
+        )
+    )
+)
+
 (define-read-only (calculate-dynamic-interest-rate (farmer principal))
     (match (map-get? farmers farmer)
         farmer-data (let (

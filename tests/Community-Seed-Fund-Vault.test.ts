@@ -1,6 +1,6 @@
 
 import { describe, expect, it } from "vitest";
-import { Cl } from "@stacks/transactions";
+import { Cl, ClarityType } from "@stacks/transactions";
 
 const accounts = simnet.getAccounts();
 const address1 = accounts.get("wallet_1")!;
@@ -30,11 +30,12 @@ describe("Loan Alert System Tests", () => {
       address1
     );
     
-    expect(result).toBeTuple();
-    expect(result['seven-day-threshold']).toBeUint(1008);  // 7 days
-    expect(result['three-day-threshold']).toBeUint(432);   // 3 days
-    expect(result['one-day-threshold']).toBeUint(144);     // 1 day
-    expect(result['enabled']).toBeBool(true);
+    expect(result).toHaveClarityType(ClarityType.Tuple);
+    const settings = result.data;
+    expect(settings['seven-day-threshold']).toBeUint(1008);
+    expect(settings['three-day-threshold']).toBeUint(432);
+    expect(settings['one-day-threshold']).toBeUint(144);
+    expect(settings['enabled']).toBeBool(true);
   });
   
   it("should update alert thresholds (owner only)", () => {
@@ -46,8 +47,8 @@ describe("Loan Alert System Tests", () => {
       deployer
     );
     
-    expect(updateResult).toBeOk();
-    expect(updateResult).toBeBool(true);
+    expect(updateResult).toHaveClarityType(ClarityType.ResponseOk);
+    expect(updateResult.value).toBeBool(true);
     
     // Verify settings were updated
     const { result: settingsResult } = simnet.callReadOnlyFn(
@@ -57,11 +58,12 @@ describe("Loan Alert System Tests", () => {
       address1
     );
     
-    expect(settingsResult).toBeTuple();
-    expect(settingsResult['seven-day-threshold']).toBeUint(2016);
-    expect(settingsResult['three-day-threshold']).toBeUint(864);
-    expect(settingsResult['one-day-threshold']).toBeUint(288);
-    expect(settingsResult['fund-low-balance-threshold']).toBeUint(200000000);
+    expect(settingsResult).toHaveClarityType(ClarityType.Tuple);
+    const updatedSettings = settingsResult.data;
+    expect(updatedSettings['seven-day-threshold']).toBeUint(2016);
+    expect(updatedSettings['three-day-threshold']).toBeUint(864);
+    expect(updatedSettings['one-day-threshold']).toBeUint(288);
+    expect(updatedSettings['fund-low-balance-threshold']).toBeUint(200000000);
   });
   
   it("should reject invalid alert threshold updates", () => {
@@ -94,8 +96,8 @@ describe("Loan Alert System Tests", () => {
       address1
     );
     
-    expect(result).toBeTuple();
-    const healthScore = result;
+    expect(result).toHaveClarityType(ClarityType.Tuple);
+    const healthScore = result.data;
     
     // Should have structure with all required fields
     expect(healthScore).toHaveProperty('overall-score');
@@ -121,8 +123,8 @@ describe("Loan Alert System Tests", () => {
       address1
     );
     
-    expect(result).toBeTuple();
-    const alertData = result;
+    expect(result).toHaveClarityType(ClarityType.Tuple);
+    const alertData = result.data;
     
     expect(alertData).toHaveProperty('alert-triggered');
     expect(alertData).toHaveProperty('current-balance');
@@ -165,8 +167,8 @@ describe("Loan Alert System Tests", () => {
       address1
     );
     
-    expect(result).toBeTuple();
-    const summary = result;
+    expect(result).toHaveClarityType(ClarityType.Tuple);
+    const summary = result.data;
     
     expect(summary).toHaveProperty('total-loans');
     expect(summary).toHaveProperty('overdue-count');
@@ -199,8 +201,8 @@ describe("Loan Alert System Tests", () => {
       address1
     );
     
-    expect(result).toBeTuple();
-    const metrics = result;
+    expect(result).toHaveClarityType(ClarityType.Tuple);
+    const metrics = result.data;
     
     expect(metrics).toHaveProperty('total-active-loans');
     expect(metrics).toHaveProperty('total-overdue-loans');
@@ -237,7 +239,7 @@ describe("Integrated Alert System Tests", () => {
       [Cl.stringAscii("Test Farmer"), Cl.stringAscii("Test Location")],
       address1
     );
-    expect(registerResult).toBeOk();
+    expect(registerResult).toHaveClarityType(ClarityType.ResponseOk);
     
     // 2. Add funds to vault
     const { result: contributeResult } = simnet.callPublicFn(
@@ -246,7 +248,7 @@ describe("Integrated Alert System Tests", () => {
       [Cl.uint(1000000000)], // 10,000 STX
       address2
     );
-    expect(contributeResult).toBeOk();
+    expect(contributeResult).toHaveClarityType(ClarityType.ResponseOk);
     
     // 3. Request loan (should initialize alert tracking)
     const { result: loanResult } = simnet.callPublicFn(
@@ -255,8 +257,8 @@ describe("Integrated Alert System Tests", () => {
       [Cl.uint(500000000)], // 5,000 STX
       address1
     );
-    expect(loanResult).toBeOk();
-    const loanId = loanResult.expectUint();
+    expect(loanResult).toHaveClarityType(ClarityType.ResponseOk);
+    const loanId = Number((loanResult.value as any).value);
     
     // 4. Check that loan alerts were initialized
     const { result: alertStatus } = simnet.callReadOnlyFn(
@@ -266,8 +268,8 @@ describe("Integrated Alert System Tests", () => {
       address1
     );
     
-    expect(alertStatus).toBeSome();
-    const alertData = alertStatus.expectSome();
+    expect(alertStatus).toHaveClarityType(ClarityType.OptionalSome);
+    const alertData = (alertStatus as any).value.data;
     expect(alertData['seven-day-alert']).toBeBool(false);
     expect(alertData['three-day-alert']).toBeBool(false);
     expect(alertData['one-day-alert']).toBeBool(false);
@@ -280,7 +282,7 @@ describe("Integrated Alert System Tests", () => {
       [Cl.uint(loanId)],
       deployer
     );
-    expect(approveResult).toBeOk();
+    expect(approveResult).toHaveClarityType(ClarityType.ResponseOk);
     
     // 6. Check loan due dates
     const { result: dueDateCheck } = simnet.callReadOnlyFn(
@@ -290,8 +292,8 @@ describe("Integrated Alert System Tests", () => {
       address1
     );
     
-    expect(dueDateCheck).toBeSome();
-    const dueDateInfo = dueDateCheck.expectSome();
+    expect(dueDateCheck).toHaveClarityType(ClarityType.OptionalSome);
+    const dueDateInfo = (dueDateCheck as any).value.data;
     expect(dueDateInfo['loan-id']).toBeUint(loanId);
     expect(dueDateInfo).toHaveProperty('due-block');
     expect(dueDateInfo).toHaveProperty('blocks-remaining');
@@ -304,8 +306,8 @@ describe("Integrated Alert System Tests", () => {
       address1
     );
     
-    expect(statusReport).toBeSome();
-    const report = statusReport.expectSome();
+    expect(statusReport).toHaveClarityType(ClarityType.OptionalSome);
+    const report = (statusReport as any).value.data;
     expect(report['loan-id']).toBeUint(loanId);
     expect(report['farmer']).toBePrincipal(address1);
     expect(report['amount']).toBeUint(500000000);
@@ -320,8 +322,8 @@ describe("Integrated Alert System Tests", () => {
       address1
     );
     
-    expect(riskAssessment).toBeSome();
-    const risk = riskAssessment.expectSome();
+    expect(riskAssessment).toHaveClarityType(ClarityType.OptionalSome);
+    const risk = (riskAssessment as any).value.data;
     expect(risk['loan-id']).toBeUint(loanId);
     expect(risk['farmer']).toBePrincipal(address1);
     expect(risk).toHaveProperty('reputation-score');
@@ -336,8 +338,8 @@ describe("Integrated Alert System Tests", () => {
       address1
     );
     
-    const health = healthAfterLoan;
-    expect(health['fund-balance']).toBeUint(500000000); // Remaining after loan
+    const health = healthAfterLoan.data;
+    expect(health['fund-balance']).toBeUint(500000000);
     expect(health['total-loans']).toBeUint(1);
     expect(health['activity-score']).toBeUint(30); // Should have activity now
     
@@ -349,8 +351,8 @@ describe("Integrated Alert System Tests", () => {
       address1
     );
     
-    const alertInfo = balanceAlert;
-    expect(alertInfo['alert-triggered']).toBeBool(false); // Should be false with 5000 STX remaining
+    const alertInfo = balanceAlert.data;
+    expect(alertInfo['alert-triggered']).toBeBool(false);
     expect(alertInfo['current-balance']).toBeUint(500000000);
   });
 });
